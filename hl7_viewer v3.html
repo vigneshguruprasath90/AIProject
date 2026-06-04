@@ -1,0 +1,1109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HL7 Viewer & Editor</title>
+<style>
+  :root {
+    --bg: #1E2127; --panel: #252A33; --panel2: #2C3140;
+    --accent: #4D9EFF; --accent2: #56D364; --accent3: #FF7B50;
+    --text: #E6EDF3; --muted: #8B949E; --border: #30363D;
+    --seg-hdr: #2D333B; --row: #21262D; --row-alt: #1C2128;
+    --hl: #3D4F6E; --error: #F85149; --warn: #D29922; --ok: #3FB950;
+    --diff-add: #1a3a2a; --diff-del: #3a1a1a; --diff-chg: #2a2a1a;
+    --radius: 6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Top bar ── */
+  #topbar { background: var(--panel); display: flex; align-items: center; padding: 0 16px; height: 50px; border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 10px; }
+  #topbar .logo { color: var(--accent); font-size: 15px; font-weight: 700; white-space: nowrap; }
+  #topbar .tag { color: var(--muted); font-size: 11px; }
+  #topbar .spacer { flex: 1; }
+  .btn { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 5px 11px; font-size: 12px; cursor: pointer; transition: background 0.15s; white-space: nowrap; }
+  .btn:hover { background: var(--hl); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn.primary:hover { background: #3A8AEF; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+
+  /* ── Main tab strip (top-level) ── */
+  #main-tabs { display: flex; background: var(--panel); border-bottom: 2px solid var(--border); flex-shrink: 0; }
+  .main-tab { padding: 9px 20px; font-size: 12px; cursor: pointer; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -2px; transition: all 0.15s; }
+  .main-tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--panel2); font-weight: 600; }
+  .main-tab-content { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+  .main-tab-content.active { display: flex; }
+
+  /* ── Layout (Viewer tab) ── */
+  #viewer-layout { display: flex; flex: 1; overflow: hidden; }
+  #left { display: flex; flex-direction: column; width: 42%; min-width: 280px; border-right: 1px solid var(--border); }
+  #right { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── Inner tabs (Input/Output) ── */
+  .tabs { display: flex; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .tab { padding: 7px 14px; font-size: 12px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); background: var(--panel2); }
+  .tab-content { display: none; flex: 1; overflow: hidden; flex-direction: column; }
+  .tab-content.active { display: flex; }
+
+  /* ── Filter bar ── */
+  #filter-bar { background: var(--panel2); display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  #filter-bar label { color: var(--muted); font-size: 11px; white-space: nowrap; }
+  #filter-bar input, #filter-bar select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 7px; font-size: 11px; font-family: 'Consolas', monospace; outline: none; }
+  #filter-bar input:focus, #filter-bar select:focus { border-color: var(--accent); }
+
+  /* ── Textareas ── */
+  #input-box, #output-box { flex: 1; background: var(--bg); color: var(--text); border: none; outline: none; resize: none; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; padding: 10px; line-height: 1.6; }
+  #output-box { color: var(--accent2); }
+  .parse-bar { background: var(--panel); padding: 7px 10px; display: flex; gap: 8px; border-top: 1px solid var(--border); flex-shrink: 0; align-items: center; }
+  .parse-bar .hint { color: var(--muted); font-size: 11px; }
+
+  /* ── Segment browser ── */
+  #seg-panel { flex: 1; display: flex; flex-direction: column; border-bottom: 1px solid var(--border); min-height: 0; }
+  .panel-hdr { background: var(--seg-hdr); display: flex; align-items: center; padding: 0 10px; height: 32px; font-size: 12px; font-weight: 600; flex-shrink: 0; gap: 8px; }
+  .panel-hdr .count { margin-left: auto; color: var(--muted); font-size: 11px; }
+  #tree-wrap { flex: 1; overflow: auto; }
+  #seg-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: 'Consolas', monospace; }
+  #seg-table th { position: sticky; top: 0; background: var(--seg-hdr); color: var(--muted); padding: 5px 10px; text-align: left; font-size: 11px; font-weight: 600; z-index: 1; }
+  #seg-table td { padding: 5px 10px; border-bottom: 1px solid rgba(48,54,61,0.5); vertical-align: middle; }
+  .seg-row td { color: var(--accent); font-weight: 700; background: var(--seg-hdr); cursor: pointer; font-family: 'Segoe UI', sans-serif; font-size: 12px; }
+  .seg-row:hover td { background: var(--hl); }
+  .fld-row td { color: var(--text); cursor: pointer; }
+  .fld-row:nth-child(even) td { background: var(--row-alt); }
+  .fld-row:nth-child(odd) td { background: var(--row); }
+  .fld-row:hover td { background: var(--hl); }
+  .fld-row.selected td { background: var(--hl); color: #fff; }
+  .empty-val { color: var(--muted); }
+  .seg-badge { display: inline-block; background: rgba(77,158,255,0.15); color: var(--accent); padding: 1px 6px; border-radius: 3px; font-size: 11px; }
+  .fld-idx { color: var(--muted); font-size: 11px; }
+  .trunc { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+  .seg-toggle { cursor: pointer; user-select: none; color: var(--muted); margin-right: 6px; }
+
+  /* ── Field editor ── */
+  #edit-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+  #edit-body { flex: 1; overflow: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .field-path { color: var(--accent); font-family: 'Consolas', monospace; font-size: 13px; font-weight: 700; }
+  .field-desc-txt { color: var(--muted); font-size: 11px; }
+  .lbl { color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+  #field-editor { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 10px; font-family: 'Consolas', monospace; font-size: 12px; width: 100%; outline: none; }
+  #field-editor:focus { border-color: var(--accent); }
+  .edit-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  #comp-table { width: 100%; border-collapse: collapse; font-size: 11px; font-family: 'Consolas', monospace; }
+  #comp-table th { background: var(--seg-hdr); color: var(--muted); padding: 4px 8px; text-align: left; font-size: 11px; }
+  #comp-table td { padding: 4px 8px; border-bottom: 1px solid rgba(48,54,61,0.4); }
+  #comp-table tr:nth-child(even) td { background: var(--row-alt); }
+  #comp-table tr:nth-child(odd) td { background: var(--row); }
+  #comp-table td:first-child { color: var(--muted); }
+  .rep-note { color: var(--warn); font-size: 11px; }
+
+  /* ── Compare tab ── */
+  #compare-layout { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+  #compare-inputs { display: flex; flex: 1; overflow: hidden; min-height: 160px; }
+  .cmp-pane { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+  .cmp-pane:last-child { border-right: none; }
+  .cmp-pane-hdr { background: var(--seg-hdr); padding: 5px 10px; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+  .cmp-textarea { flex: 1; background: var(--bg); color: var(--text); border: none; outline: none; resize: none; font-family: 'Consolas', monospace; font-size: 11px; padding: 8px; line-height: 1.5; }
+  #compare-result-wrap { flex: 2; display: flex; flex-direction: column; overflow: hidden; border-top: 2px solid var(--border); min-height: 0; }
+  #cmp-result-hdr { background: var(--seg-hdr); padding: 5px 12px; display: flex; align-items: center; font-size: 11px; font-weight: 600; flex-shrink: 0; gap: 12px; }
+  #cmp-summary { color: var(--warn); font-size: 11px; margin-left: auto; }
+  #cmp-result { flex: 1; background: var(--bg); color: var(--text); overflow: auto; font-family: 'Consolas', monospace; font-size: 12px; padding: 8px; line-height: 1.6; white-space: pre; }
+  .diff-add { background: var(--diff-add); color: var(--accent2); display: block; }
+  .diff-del { background: var(--diff-del); color: var(--error); display: block; }
+  .diff-chg { background: var(--diff-chg); color: var(--warn); display: block; }
+  .diff-same { color: var(--muted); display: block; }
+  .cmp-legend { display: flex; gap: 0; background: var(--panel2); flex-shrink: 0; padding: 4px 8px; }
+  .cmp-legend span { font-size: 11px; padding: 2px 10px; border-radius: 3px; margin-right: 6px; }
+
+  /* ── Base64/PDF tab ── */
+  #b64-layout { display: flex; flex: 1; overflow: hidden; }
+  #b64-left { display: flex; flex-direction: column; width: 44%; border-right: 1px solid var(--border); }
+  #b64-right { flex: 1; display: flex; flex-direction: column; }
+  .b64-hdr { background: var(--seg-hdr); padding: 5px 10px; font-size: 11px; font-weight: 600; flex-shrink: 0; }
+  #b64-input { flex: 1; background: var(--bg); color: var(--text); border: none; outline: none; resize: none; font-family: 'Consolas', monospace; font-size: 11px; padding: 8px; line-height: 1.5; }
+  #b64-btn-bar { background: var(--panel); padding: 7px 8px; display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--border); flex-shrink: 0; }
+  #b64-info { background: var(--panel2); padding: 5px 10px; font-size: 11px; color: var(--accent); font-weight: 600; flex-shrink: 0; }
+  #b64-output { flex: 1; background: var(--bg); color: var(--accent2); overflow: auto; font-family: 'Consolas', monospace; font-size: 11px; padding: 10px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+  #pdf-embed-wrap { flex: 1; display: none; flex-direction: column; }
+  #pdf-embed { flex: 1; border: none; width: 100%; }
+
+  /* ── Statistics tab ── */
+  #stats-layout { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; }
+  #stats-cards { display: flex; flex-wrap: wrap; gap: 10px; }
+  .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 18px; min-width: 120px; text-align: center; }
+  .stat-card .val { font-size: 22px; font-weight: 700; }
+  .stat-card .title { font-size: 10px; color: var(--muted); margin-top: 4px; }
+  #stats-freq-hdr { color: var(--accent); font-size: 13px; font-weight: 700; }
+  #stats-table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: 'Consolas', monospace; background: var(--panel); border-radius: var(--radius); overflow: hidden; }
+  #stats-table th { background: var(--seg-hdr); color: var(--muted); padding: 6px 12px; text-align: left; font-size: 11px; }
+  #stats-table td { padding: 6px 12px; border-bottom: 1px solid rgba(48,54,61,0.4); }
+  #stats-table tr:hover td { background: var(--hl); }
+  #stats-table td:first-child { color: var(--accent); font-weight: 700; }
+  #stats-table td:nth-child(2) { color: var(--accent3); font-weight: 600; text-align: center; }
+
+  /* ── Status bar ── */
+  #statusbar { background: var(--panel); height: 26px; display: flex; align-items: center; padding: 0 12px; font-size: 11px; color: var(--muted); gap: 8px; flex-shrink: 0; border-top: 1px solid var(--border); }
+  #status-text { flex: 1; }
+  #msg-type { color: var(--accent2); font-weight: 600; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  /* ── Field search in editor header ── */
+  #edit-panel-hdr { background: var(--seg-hdr); display: flex; align-items: center; padding: 0 10px; height: 32px; font-size: 12px; font-weight: 600; flex-shrink: 0; gap: 8px; }
+  #field-search { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; font-size: 11px; font-family: 'Consolas', monospace; outline: none; width: 160px; }
+  #field-search:focus { border-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════ TOP BAR ════════════════════ -->
+<div id="topbar">
+  <span class="logo">⚕ HL7 Viewer &amp; Editor</span>
+  <span class="tag">v2.0 · Free &amp; Open Source</span>
+  <div class="spacer"></div>
+  <button class="btn" onclick="openFile()">📂 Open</button>
+  <button class="btn" onclick="saveFile()">💾 Save</button>
+  <button class="btn" onclick="copyOutput()">📋 Copy</button>
+  <button class="btn" onclick="clearAll()">🗑 Clear</button>
+  <button class="btn" onclick="loadSample()">💡 Sample</button>
+</div>
+
+<!-- ════════════════════ MAIN TABS ════════════════════ -->
+<div id="main-tabs">
+  <div class="main-tab active" onclick="showMainTab('viewer')">🔬 Viewer &amp; Editor</div>
+  <div class="main-tab" onclick="showMainTab('compare')">⚖ Compare</div>
+  <div class="main-tab" onclick="showMainTab('b64')">📄 Base64 / PDF</div>
+  <div class="main-tab" onclick="showMainTab('stats')">📊 Statistics</div>
+</div>
+
+<!-- ════════════════════ TAB: VIEWER ════════════════════ -->
+<div class="main-tab-content active" id="mc-viewer">
+  <div id="viewer-layout">
+
+    <!-- LEFT -->
+    <div id="left">
+      <div class="tabs">
+        <div class="tab active" onclick="showTab('input')">📥 Input</div>
+        <div class="tab" onclick="showTab('output')">📤 Output</div>
+      </div>
+
+      <!-- Filter bar -->
+      <div id="filter-bar">
+        <label>🔍 Filter:</label>
+        <input type="text" id="filter-text" placeholder="search value..." oninput="applyFilter()" style="width:130px">
+        <label>Segment:</label>
+        <select id="seg-filter" onchange="applyFilter()">
+          <option value="ALL">ALL</option>
+        </select>
+        <button class="btn" onclick="clearFilter()" style="padding:3px 8px;font-size:11px">✖</button>
+      </div>
+
+      <div class="tab-content active" id="tab-input">
+        <textarea id="input-box" placeholder="Paste your HL7 message here...&#10;&#10;MSH|^~\&amp;|..." spellcheck="false"></textarea>
+        <div class="parse-bar">
+          <button class="btn primary" onclick="parseMessage()">▶ Parse Message</button>
+          <span class="hint">Ctrl+Enter to parse</span>
+        </div>
+      </div>
+      <div class="tab-content" id="tab-output">
+        <textarea id="output-box" readonly placeholder="Edited/rebuilt HL7 will appear here after parsing..." spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div id="right">
+      <!-- Segment browser -->
+      <div id="seg-panel">
+        <div class="panel-hdr">
+          🔍 Segment Browser
+          <span class="count" id="seg-count"></span>
+        </div>
+        <div id="tree-wrap">
+          <table id="seg-table">
+            <thead>
+              <tr>
+                <th style="width:110px">Segment</th>
+                <th style="width:60px">Field</th>
+                <th>Value</th>
+                <th style="width:200px">Description</th>
+              </tr>
+            </thead>
+            <tbody id="seg-body">
+              <tr><td colspan="4" style="color:var(--muted);padding:20px;text-align:center;font-family:sans-serif">Paste an HL7 message and click Parse to view segments</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Field editor -->
+      <div id="edit-panel">
+        <div id="edit-panel-hdr">
+          ✏ Field Editor &amp; Component View
+          <span style="margin-left:auto;color:var(--muted);font-size:11px;font-weight:400">Search field:</span>
+          <input type="text" id="field-search" placeholder="type and press Enter…" onkeydown="if(event.key==='Enter')fieldSearchNext()">
+          <button class="btn" onclick="fieldSearchNext()" style="padding:3px 8px;font-size:11px">▶</button>
+        </div>
+        <div id="edit-body">
+          <div>
+            <div class="field-path" id="field-path">Select a field from the segment browser →</div>
+            <div class="field-desc-txt" id="field-desc"></div>
+          </div>
+          <div>
+            <div class="lbl">Raw Field Value:</div>
+            <input type="text" id="field-editor" placeholder="Select a field to edit..." />
+          </div>
+          <div class="edit-btns">
+            <button class="btn primary" onclick="applyEdit()">✔ Apply Change (Enter)</button>
+            <button class="btn" onclick="resetField()">✖ Reset Field</button>
+            <button class="btn" id="view-pdf-btn" onclick="sendToPdfTab()" disabled>📄 View as PDF</button>
+          </div>
+          <div>
+            <div class="lbl">Component Breakdown (^ delimited):</div>
+            <table id="comp-table">
+              <thead><tr><th>Component #</th><th>Value</th><th>Sub-components (&amp;)</th></tr></thead>
+              <tbody id="comp-body"><tr><td colspan="3" style="color:var(--muted)">—</td></tr></tbody>
+            </table>
+          </div>
+          <div class="rep-note" id="rep-note"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ TAB: COMPARE ════════════════════ -->
+<div class="main-tab-content" id="mc-compare">
+  <div id="compare-layout">
+    <div style="background:var(--seg-hdr);display:flex;align-items:center;padding:0 12px;height:36px;flex-shrink:0;gap:8px;">
+      <span style="font-size:12px;font-weight:600;">⚖ HL7 Message Compare</span>
+      <span style="color:var(--muted);font-size:11px;">— paste two messages to diff them</span>
+      <div style="margin-left:auto;display:flex;gap:6px;">
+        <button class="btn" onclick="loadCompareFromEditor()">⬆ Load from Editor (A)</button>
+        <button class="btn primary" onclick="doCompare()">▶ Compare</button>
+        <button class="btn" onclick="clearCompare()">🗑 Clear</button>
+      </div>
+    </div>
+    <div id="compare-inputs">
+      <div class="cmp-pane">
+        <div class="cmp-pane-hdr" style="color:var(--accent)">📨 Message A &nbsp;(original)</div>
+        <textarea class="cmp-textarea" id="cmp-a" placeholder="Paste original HL7 message here..."></textarea>
+      </div>
+      <div class="cmp-pane">
+        <div class="cmp-pane-hdr" style="color:var(--accent2)">📩 Message B &nbsp;(modified)</div>
+        <textarea class="cmp-textarea" id="cmp-b" placeholder="Paste modified HL7 message here..."></textarea>
+      </div>
+    </div>
+    <div id="compare-result-wrap">
+      <div id="cmp-result-hdr">
+        Diff Result
+        <span id="cmp-summary"></span>
+      </div>
+      <div class="cmp-legend">
+        <span style="background:var(--diff-add);color:var(--accent2)">● Added</span>
+        <span style="background:var(--diff-del);color:var(--error)">● Removed</span>
+        <span style="background:var(--diff-chg);color:var(--warn)">● Changed</span>
+      </div>
+      <div id="cmp-result"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ TAB: BASE64/PDF ════════════════════ -->
+<div class="main-tab-content" id="mc-b64">
+  <div id="b64-layout">
+    <div id="b64-left">
+      <div class="b64-hdr">📄 Paste Base64-encoded data here:</div>
+      <textarea id="b64-input" placeholder="Paste base64 encoded string here...&#10;&#10;Tip: Click 'Import from OBX-5' to auto-load from a parsed message."></textarea>
+      <div id="b64-btn-bar">
+        <button class="btn primary" onclick="decodeB64()">🔓 Decode &amp; Preview</button>
+        <button class="btn" onclick="openPdfBrowser()">📄 Open PDF in Browser</button>
+        <button class="btn" onclick="saveDecoded()">💾 Save File</button>
+        <button class="btn" onclick="clearB64()">🗑 Clear</button>
+        <button class="btn" onclick="importObx5()">⬆ Import from OBX-5</button>
+      </div>
+    </div>
+    <div id="b64-right">
+      <div id="b64-info">Decoded output will appear here</div>
+      <!-- Text output -->
+      <div id="b64-output"></div>
+      <!-- PDF embed (shown when PDF detected) -->
+      <div id="pdf-embed-wrap">
+        <iframe id="pdf-embed" src=""></iframe>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════ TAB: STATISTICS ════════════════════ -->
+<div class="main-tab-content" id="mc-stats">
+  <div style="background:var(--seg-hdr);display:flex;align-items:center;padding:0 12px;height:36px;flex-shrink:0;">
+    <span style="font-size:12px;font-weight:600;">📊 Message Statistics &amp; Summary</span>
+    <button class="btn" onclick="refreshStats()" style="margin-left:auto">🔄 Refresh</button>
+  </div>
+  <div id="stats-layout">
+    <div id="stats-cards"></div>
+    <div id="stats-freq-hdr">Segment Frequency</div>
+    <table id="stats-table">
+      <thead><tr><th style="width:90px">Segment</th><th style="width:70px">Count</th><th>Description</th><th>Notes</th></tr></thead>
+      <tbody id="stats-body"><tr><td colspan="4" style="color:var(--muted);padding:16px">Parse a message first, then click Refresh.</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ════════════════════ STATUS BAR ════════════════════ -->
+<div id="statusbar">
+  <span id="status-text">Ready · Paste HL7 message to begin</span>
+  <span id="msg-type"></span>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════
+// DICTIONARIES  (unchanged from original)
+// ════════════════════════════════════════════════════
+const SEG_DESCS = {MSH:"Message Header",EVN:"Event Type",PID:"Patient Identification",PV1:"Patient Visit",PV2:"Patient Visit - Additional",OBR:"Observation Request",OBX:"Observation/Result",ORC:"Common Order",NK1:"Next of Kin",DG1:"Diagnosis",GT1:"Guarantor",IN1:"Insurance",IN2:"Insurance - Additional",AL1:"Patient Allergy",PRB:"Problem",NTE:"Notes and Comments",MRG:"Merge Patient Info",FT1:"Financial Transaction",ROL:"Role",TXA:"Transcription Document Header",SPM:"Specimen",SAC:"Specimen Container Detail",RXA:"Pharmacy Administration",RXO:"Pharmacy Order",RXR:"Pharmacy Route",TQ1:"Timing/Quantity",SFT:"Software Segment",MSA:"Message Acknowledgment",ERR:"Error",STF:"Staff Identification"};
+const MSH_F = {1:"Field Separator",2:"Encoding Characters",3:"Sending Application",4:"Sending Facility",5:"Receiving Application",6:"Receiving Facility",7:"Date/Time of Message",8:"Security",9:"Message Type",10:"Message Control ID",11:"Processing ID",12:"Version ID",13:"Sequence Number",15:"Accept Acknowledgment Type",16:"Application Acknowledgment Type",17:"Country Code",18:"Character Set",19:"Principal Language",21:"Message Profile Identifier"};
+const PID_F = {1:"Set ID",2:"Patient ID (External)",3:"Patient Identifier List",4:"Alternate Patient ID",5:"Patient Name",6:"Mother Maiden Name",7:"Date/Time of Birth",8:"Admin Sex",9:"Patient Alias",10:"Race",11:"Patient Address",12:"County Code",13:"Phone (Home)",14:"Phone (Business)",15:"Primary Language",16:"Marital Status",17:"Religion",18:"Account Number",19:"SSN",20:"Driver License",22:"Ethnic Group",23:"Birth Place",24:"Multiple Birth",25:"Birth Order",29:"Patient Death Date",30:"Patient Death Indicator"};
+const PV1_F = {1:"Set ID",2:"Patient Class",3:"Assigned Patient Location",4:"Admission Type",5:"Preadmit Number",6:"Prior Patient Location",7:"Attending Doctor",8:"Referring Doctor",9:"Consulting Doctor",10:"Hospital Service",14:"Admit Source",17:"Admitting Doctor",18:"Patient Type",19:"Visit Number",20:"Financial Class",44:"Admit Date/Time",45:"Discharge Date/Time"};
+const OBX_F = {1:"Set ID",2:"Value Type",3:"Observation Identifier",4:"Observation Sub-ID",5:"Observation Value",6:"Units",7:"References Range",8:"Abnormal Flags",9:"Probability",10:"Nature of Abnormal Test",11:"Observation Result Status",14:"Date/Time of Observation",16:"Responsible Observer",17:"Observation Method"};
+const OBR_F = {1:"Set ID",2:"Placer Order Number",3:"Filler Order Number",4:"Universal Service Identifier",5:"Priority",6:"Requested Date/Time",7:"Observation Date/Time",8:"Observation End Date/Time",14:"Specimen Received Date/Time",16:"Ordering Provider",18:"Placer Field 1",19:"Placer Field 2",22:"Results Reported Date/Time",24:"Diagnostic Service Section",25:"Result Status"};
+const FIELD_DESCS = {MSH:MSH_F,PID:PID_F,PV1:PV1_F,OBX:OBX_F,OBR:OBR_F};
+
+const SAMPLE = `MSH|^~\\&|ELI^93005||EMR^93005|Receiving FacID|20260520160615||ORU^R01|226052016061500654|P|2.5|||AL|NE|USA\rPID|1||123456^^^MRN||DOE^JOHN^A||19800101|M|||123 MAIN ST^^SPRINGFIELD^IL^62701^USA||555-555-1234||EN|S|||SSN123456789\rPV1|1|I|ICU^101^A||||1234^SMITH^JOHN^A|||SUR|||||||1234^SMITH^JOHN^A|IP||||||||||||||||||||||ADM|20231015080000\rOBR|1|ORD001|FILL001|85025^CBC^L|||20231015100000|||||||20231015110000||1234^SMITH^JOHN^A|||||20231015115000||HM|F\rOBX|1|NM|6690-2^WBC^LN||7.5|10*3/uL|4.5-11.0|N|||F|||20231015115000\rOBX|2|NM|789-8^RBC^LN||4.8|10*6/uL|4.5-5.5|N|||F|||20231015115000\rOBX|3|NM|718-7^HGB^LN||14.5|g/dL|13.5-17.5|N|||F|||20231015115000\rOBX|4|NM|4544-3^HCT^LN||43.2|%|41.0-53.0|N|||F|||20231015115000\rNTE|1||Patient fasting for 8 hours prior to collection`;
+
+// ════════════════════════════════════════════════════
+// STATE  (unchanged from original)
+// ════════════════════════════════════════════════════
+let FIELD_SEP = '|', COMP_SEP = '^', REP_SEP = '~', ESC = '\\', SUB_SEP = '&';
+let parsedSegs = [];
+let selSegIdx = null, selFldIdx = null;
+let expandedSegs = new Set();
+let _b64DecodedBytes = null;
+let _fieldSearchIdx = -1;  // for field search navigation
+
+// ════════════════════════════════════════════════════
+// MAIN TAB SWITCHING
+// ════════════════════════════════════════════════════
+function showMainTab(id) {
+  document.querySelectorAll('.main-tab').forEach((t, i) => {
+    const ids = ['viewer','compare','b64','stats'];
+    t.classList.toggle('active', ids[i] === id);
+  });
+  document.querySelectorAll('.main-tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('mc-' + id).classList.add('active');
+}
+
+// ════════════════════════════════════════════════════
+// HL7 PARSER  (unchanged from original)
+// ════════════════════════════════════════════════════
+function parseHL7(text) {
+  text = text.replace(/\r\n/g,'\r').replace(/\n/g,'\r').trim();
+  const lines = text.split('\r').filter(l => l.trim());
+  const segs = [];
+  for (const line of lines) {
+    const name = line.slice(0,3);
+    if (name === 'MSH' && line.length >= 4) {
+      FIELD_SEP = line[3];
+      if (line.length >= 8) { COMP_SEP = line[4]; REP_SEP = line[5]; ESC = line[6]; SUB_SEP = line[7]; }
+    }
+    let fields;
+    if (name === 'MSH') {
+      const rawFields = line.split(FIELD_SEP);
+      fields = [];
+      fields.push([[[rawFields[0]]]]); // [0]: "MSH"
+      fields.push([[[FIELD_SEP]]]);    // [1]: MSH-1 = "|"
+      fields.push([[[rawFields[1] || '']]]);  // [2]: MSH-2 = "^~\&"
+      for (let i = 2; i < rawFields.length; i++) {
+        fields.push(rawFields[i].split(REP_SEP).map(rep =>
+          rep.split(COMP_SEP).map(comp => comp.split(SUB_SEP))
+        ));
+      }
+    } else {
+      const rawFields = line.split(FIELD_SEP);
+      fields = rawFields.map(f =>
+        f.split(REP_SEP).map(rep =>
+          rep.split(COMP_SEP).map(comp => comp.split(SUB_SEP))
+        )
+      );
+    }
+    segs.push({ name, raw: line, fields });
+  }
+  return segs;
+}
+
+function fieldToRaw(field) {
+  return field.map(rep =>
+    rep.map(comp => comp.join(SUB_SEP)).join(COMP_SEP)
+  ).join(REP_SEP);
+}
+
+function rebuildRaw(seg) {
+  if (seg.name === 'MSH') {
+    const dataFields = seg.fields.slice(3).map(f => fieldToRaw(f));
+    return 'MSH' + FIELD_SEP + COMP_SEP + REP_SEP + ESC + SUB_SEP + FIELD_SEP + dataFields.join(FIELD_SEP);
+  }
+  return seg.fields.map(f => fieldToRaw(f)).join(FIELD_SEP);
+}
+
+function getFieldDesc(segName, fIdx) {
+  const map = FIELD_DESCS[segName];
+  return map && map[fIdx] ? map[fIdx] : `Field ${fIdx}`;
+}
+
+// ════════════════════════════════════════════════════
+// PARSE & RENDER (unchanged core + filter enhancement)
+// ════════════════════════════════════════════════════
+function parseMessage() {
+  const text = document.getElementById('input-box').value.trim();
+  if (!text) { setStatus('⚠ No HL7 content to parse'); return; }
+  try {
+    parsedSegs = parseHL7(text);
+    expandedSegs = new Set(parsedSegs.map((_,i) => i));
+    renderTree();
+    updateOutput();
+    detectMsgType();
+    updateSegFilterChoices();
+    document.getElementById('seg-count').textContent = `${parsedSegs.length} segments`;
+    setStatus(`✔ Parsed ${parsedSegs.length} segments successfully`);
+    showTab('input');
+  } catch(e) {
+    setStatus('✖ Parse error: ' + e.message);
+  }
+}
+
+function renderTree(segsToRender) {
+  const segs = segsToRender || parsedSegs;
+  const tbody = document.getElementById('seg-body');
+  tbody.innerHTML = '';
+  document.getElementById('seg-count').textContent = segsToRender
+    ? `${segs.length} of ${parsedSegs.length} segments`
+    : `${segs.length} segments`;
+  segs.forEach((seg, sIdx) => {
+    // Use original index for IDs when filtering
+    const origIdx = parsedSegs.indexOf(seg);
+    const s = origIdx >= 0 ? origIdx : sIdx;
+    const desc = SEG_DESCS[seg.name] || 'Custom/Z-Segment';
+    const expanded = expandedSegs.has(s);
+    const segRow = document.createElement('tr');
+    segRow.className = 'seg-row';
+    segRow.innerHTML = `<td colspan="4">
+      <span class="seg-toggle" onclick="toggleSeg(${s})">${expanded ? '▾' : '▸'}</span>
+      <span class="seg-badge">${seg.name}</span>
+      &nbsp;<span style="color:var(--muted);font-size:11px;font-weight:400">${desc}</span>
+      <span style="float:right;color:var(--muted);font-size:10px;padding-right:8px">${seg.fields.length} fields</span>
+    </td>`;
+    segRow.onclick = (e) => { if (!e.target.classList.contains('seg-toggle')) toggleSeg(s); };
+    tbody.appendChild(segRow);
+    if (expanded) {
+      seg.fields.forEach((field, fIdx) => {
+        if (fIdx === 0) return; // skip segment name token
+        const raw = fieldToRaw(field);
+        const fdesc = getFieldDesc(seg.name, fIdx);
+        const fldRow = document.createElement('tr');
+        fldRow.className = 'fld-row';
+        fldRow.id = `row_${s}_${fIdx}`;
+        fldRow.innerHTML = `
+          <td style="padding-left:24px"><span style="color:var(--muted)">${seg.name}</span></td>
+          <td><span class="fld-idx">[${fIdx}]</span></td>
+          <td>${raw ? `<span class="trunc" title="${escHtml(raw)}">${escHtml(raw)}</span>` : '<span class="empty-val">—</span>'}</td>
+          <td style="color:var(--muted);font-size:11px">${escHtml(fdesc)}</td>`;
+        fldRow.onclick = () => selectField(s, fIdx);
+        tbody.appendChild(fldRow);
+      });
+    }
+  });
+  // Re-highlight selection
+  if (selSegIdx !== null && selFldIdx !== null) {
+    const row = document.getElementById(`row_${selSegIdx}_${selFldIdx}`);
+    if (row) row.classList.add('selected');
+  }
+}
+
+function toggleSeg(sIdx) {
+  if (expandedSegs.has(sIdx)) expandedSegs.delete(sIdx);
+  else expandedSegs.add(sIdx);
+  renderTree();
+}
+
+function selectField(sIdx, fIdx) {
+  document.querySelectorAll('.fld-row.selected').forEach(r => r.classList.remove('selected'));
+  const row = document.getElementById(`row_${sIdx}_${fIdx}`);
+  if (row) row.classList.add('selected');
+  selSegIdx = sIdx; selFldIdx = fIdx;
+  const seg = parsedSegs[sIdx];
+  const field = seg.fields[fIdx];
+  const raw = fieldToRaw(field);
+  const fdesc = getFieldDesc(seg.name, fIdx);
+  document.getElementById('field-path').textContent = `${seg.name}-${fIdx}`;
+  document.getElementById('field-desc').textContent = `→ ${fdesc}`;
+  document.getElementById('field-editor').value = raw;
+  renderComponents(field);
+  document.getElementById('rep-note').textContent = field.length > 1 ? `⟳ ${field.length} repetition(s) — separated by ~` : '';
+  // Enable PDF button if looks like base64
+  document.getElementById('view-pdf-btn').disabled = !looksLikeBase64(raw);
+}
+
+function renderComponents(field) {
+  const tbody = document.getElementById('comp-body');
+  tbody.innerHTML = '';
+  field.forEach((rep, rIdx) => {
+    rep.forEach((comp, cIdx) => {
+      const val = comp[0] || '';
+      const subs = comp.length > 1 ? comp.slice(1).join(' & ') : '';
+      const repStr = field.length > 1 ? `Rep ${rIdx+1}, ` : '';
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${repStr}Comp ${cIdx+1}</td><td>${escHtml(val)}</td><td>${escHtml(subs)}</td>`;
+      tbody.appendChild(tr);
+    });
+  });
+  if (!tbody.innerHTML) tbody.innerHTML = '<tr><td colspan="3" style="color:var(--muted)">—</td></tr>';
+}
+
+function applyEdit() {
+  if (selSegIdx === null || selFldIdx === null) return;
+  const newVal = document.getElementById('field-editor').value;
+  const seg = parsedSegs[selSegIdx];
+  const parsed = newVal.split(REP_SEP).map(rep =>
+    rep.split(COMP_SEP).map(comp => comp.split(SUB_SEP))
+  );
+  seg.fields[selFldIdx] = parsed;
+  seg.raw = rebuildRaw(seg);
+  renderTree();
+  updateOutput();
+  const row = document.getElementById(`row_${selSegIdx}_${selFldIdx}`);
+  if (row) row.classList.add('selected');
+  selectField(selSegIdx, selFldIdx);
+  setStatus('✔ Field updated successfully');
+}
+
+function resetField() {
+  if (selSegIdx === null || selFldIdx === null) return;
+  const seg = parsedSegs[selSegIdx];
+  document.getElementById('field-editor').value = fieldToRaw(seg.fields[selFldIdx]);
+}
+
+function updateOutput() {
+  document.getElementById('output-box').value = parsedSegs.map(s => s.raw).join('\r\n');
+}
+
+function detectMsgType() {
+  for (const seg of parsedSegs) {
+    if (seg.name === 'MSH') {
+      try {
+        // fields[0]=name,[1]=MSH-1,[2]=MSH-2,[3]=MSH-3...so MSH-9 is fields[10], MSH-12 is fields[13]
+        const f9 = seg.fields[10];
+        const type = f9?.[0]?.[0]?.[0] || '';
+        const trigger = f9?.[0]?.[1]?.[0] || '';
+        const ver = seg.fields[13]?.[0]?.[0]?.[0] || '';
+        if (type) document.getElementById('msg-type').textContent = `${type}^${trigger}  |  HL7 v${ver}`;
+      } catch(e) {}
+    }
+  }
+}
+
+function showTab(tab) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', (i === 0 && tab === 'input') || (i === 1 && tab === 'output')));
+  document.getElementById('tab-input').classList.toggle('active', tab === 'input');
+  document.getElementById('tab-output').classList.toggle('active', tab === 'output');
+}
+
+// ════════════════════════════════════════════════════
+// FILTER  (NEW)
+// ════════════════════════════════════════════════════
+function updateSegFilterChoices() {
+  const sel = document.getElementById('seg-filter');
+  const names = ['ALL', ...new Set(parsedSegs.map(s => s.name))].sort((a,b) => a==='ALL'?-1:a.localeCompare(b));
+  sel.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
+}
+
+function applyFilter() {
+  const txt = document.getElementById('filter-text').value.trim().toLowerCase();
+  const segF = document.getElementById('seg-filter').value;
+  const filtered = parsedSegs.filter(seg => {
+    if (segF !== 'ALL' && seg.name !== segF) return false;
+    if (txt && !seg.raw.toLowerCase().includes(txt)) return false;
+    return true;
+  });
+  renderTree(filtered);
+}
+
+function clearFilter() {
+  document.getElementById('filter-text').value = '';
+  document.getElementById('seg-filter').value = 'ALL';
+  renderTree();
+}
+
+// ════════════════════════════════════════════════════
+// FIELD SEARCH  (NEW)
+// ════════════════════════════════════════════════════
+function fieldSearchNext() {
+  const term = document.getElementById('field-search').value.trim().toLowerCase();
+  if (!term || !parsedSegs.length) return;
+  // Collect all field row elements in DOM order
+  const rows = Array.from(document.querySelectorAll('.fld-row'));
+  if (!rows.length) return;
+  const startIdx = (_fieldSearchIdx + 1) % rows.length;
+  for (let i = 0; i < rows.length; i++) {
+    const idx = (startIdx + i) % rows.length;
+    const row = rows[idx];
+    const cells = row.querySelectorAll('td');
+    const cellText = Array.from(cells).map(c => c.textContent).join(' ').toLowerCase();
+    if (cellText.includes(term)) {
+      _fieldSearchIdx = idx;
+      row.scrollIntoView({ block: 'center' });
+      row.click();
+      setStatus(`🔍 Found "${term}" (result ${idx+1} of ${rows.length})`);
+      return;
+    }
+  }
+  setStatus(`⚠ "${term}" not found in any field`);
+  _fieldSearchIdx = -1;
+}
+
+// ════════════════════════════════════════════════════
+// FILE / CLIPBOARD  (unchanged)
+// ════════════════════════════════════════════════════
+function copyOutput() {
+  const out = document.getElementById('output-box').value;
+  if (!out) { setStatus('⚠ No output to copy'); return; }
+  navigator.clipboard.writeText(out).then(() => setStatus('✔ Output copied to clipboard')).catch(() => {
+    document.getElementById('output-box').select();
+    document.execCommand('copy');
+    setStatus('✔ Output copied');
+  });
+}
+
+function openFile() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.hl7,.txt,.msg,*';
+  inp.onchange = e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = ev => {
+      document.getElementById('input-box').value = ev.target.result;
+      parseMessage();
+      setStatus(`✔ Opened: ${f.name}`);
+    };
+    r.readAsText(f);
+  };
+  inp.click();
+}
+
+function saveFile() {
+  let content = document.getElementById('output-box').value;
+  if (!content) content = document.getElementById('input-box').value;
+  if (!content) { alert('No HL7 content to save.'); return; }
+  const blob = new Blob([content], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'hl7_message.hl7';
+  a.click();
+  setStatus('✔ File saved');
+}
+
+function clearAll() {
+  document.getElementById('input-box').value = '';
+  document.getElementById('output-box').value = '';
+  document.getElementById('seg-body').innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:20px;text-align:center;font-family:sans-serif">Paste an HL7 message and click Parse</td></tr>';
+  document.getElementById('comp-body').innerHTML = '<tr><td colspan="3" style="color:var(--muted)">—</td></tr>';
+  document.getElementById('field-editor').value = '';
+  document.getElementById('field-path').textContent = 'Select a field from the segment browser →';
+  document.getElementById('field-desc').textContent = '';
+  document.getElementById('rep-note').textContent = '';
+  document.getElementById('msg-type').textContent = '';
+  document.getElementById('seg-count').textContent = '';
+  document.getElementById('filter-text').value = '';
+  document.getElementById('view-pdf-btn').disabled = true;
+  parsedSegs = []; selSegIdx = null; selFldIdx = null;
+  setStatus('Cleared · Paste HL7 message to begin');
+}
+
+function loadSample() {
+  clearAll();
+  document.getElementById('input-box').value = SAMPLE.replace(/\r/g, '\n');
+  parseMessage();
+  setStatus('✔ Sample HL7 ORU^R01 message loaded');
+}
+
+// ════════════════════════════════════════════════════
+// COMPARE  (NEW)
+// ════════════════════════════════════════════════════
+function loadCompareFromEditor() {
+  const content = document.getElementById('output-box').value || document.getElementById('input-box').value;
+  if (content) {
+    document.getElementById('cmp-a').value = content;
+    showMainTab('compare');
+    setStatus('✔ Loaded current message into Compare A');
+  }
+}
+
+function doCompare() {
+  const a = document.getElementById('cmp-a').value.trim();
+  const b = document.getElementById('cmp-b').value.trim();
+  if (!a || !b) { alert('Paste both messages (A and B) to compare.'); return; }
+
+  const normalize = t => t.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n');
+  const aLines = normalize(a);
+  const bLines = normalize(b);
+
+  const result = document.getElementById('cmp-result');
+  result.innerHTML = '';
+
+  let added = 0, deleted = 0, changed = 0, same = 0;
+
+  // Simple LCS-based diff
+  const diff = computeDiff(aLines, bLines);
+  diff.forEach(([op, line]) => {
+    const span = document.createElement('span');
+    if (op === '=') { span.className = 'diff-same'; span.textContent = '   ' + line; same++; }
+    else if (op === '+') { span.className = 'diff-add'; span.textContent = '+  ' + line; added++; }
+    else if (op === '-') { span.className = 'diff-del'; span.textContent = '−  ' + line; deleted++; }
+    else if (op === '~') { span.className = 'diff-chg'; span.textContent = '≠  ' + line; changed++; }
+    result.appendChild(span);
+  });
+
+  const totalDiff = added + deleted + changed;
+  document.getElementById('cmp-summary').textContent =
+    `${same} identical · ${deleted} removed · ${added} added · ${changed} changed · ${totalDiff === 0 ? '✔ IDENTICAL' : totalDiff + ' differences'}`;
+  setStatus(`✔ Compare complete · ${totalDiff} difference(s) found`);
+}
+
+function computeDiff(a, b) {
+  // Build LCS table
+  const m = a.length, n = b.length;
+  const dp = Array.from({length: m+1}, () => new Array(n+1).fill(0));
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1] ? dp[i-1][j-1]+1 : Math.max(dp[i-1][j], dp[i][j-1]);
+  // Backtrack
+  const result = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && a[i-1] === b[j-1]) {
+      result.push(['=', a[i-1]]); i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
+      result.push(['+', b[j-1]]); j--;
+    } else {
+      result.push(['-', a[i-1]]); i--;
+    }
+  }
+  result.reverse();
+  // Merge adjacent - and + into ~ (changed)
+  const merged = [];
+  let k = 0;
+  while (k < result.length) {
+    if (result[k][0] === '-' && k+1 < result.length && result[k+1][0] === '+') {
+      merged.push(['-', result[k][1]]);
+      merged.push(['~', result[k+1][1]]);
+      k += 2;
+    } else {
+      merged.push(result[k]); k++;
+    }
+  }
+  return merged;
+}
+
+function clearCompare() {
+  document.getElementById('cmp-a').value = '';
+  document.getElementById('cmp-b').value = '';
+  document.getElementById('cmp-result').innerHTML = '';
+  document.getElementById('cmp-summary').textContent = '';
+}
+
+// ════════════════════════════════════════════════════
+// BASE64 / PDF  (NEW)
+// ════════════════════════════════════════════════════
+// ─── Base64 / HL7 ED helpers ────────────────────────────────────────────────
+// Handles ALL real-world HL7 ED (Encapsulated Data) field formats:
+//
+//   Format A: ^AP^PDF^Base64^<data>          (encoding descriptor = "Base64")
+//   Format B: ^AP^PDF^Base 64 Encoding^<data> (verbose encoding descriptor)
+//   Format C: PDF^IMAGE^^^<data>              (BLANK encoding, data in last component)
+//   Format D: <plain_base64>                  (no HL7 wrapper at all)
+//
+// Strategy:
+//   1. If component[3] contains "BASE64" or "B64" -> payload is component[4]
+//   2. Otherwise, find the largest component that looks like valid base64 data
+//   3. Fall back to whole string if it looks like base64
+
+function _cleanCtrl(s) {
+  // Remove all control chars and whitespace for comparison/validation
+  return s.replace(/[\x00-\x1f\x7f\s]/g, '');
+}
+
+function isBase64Encoding(enc) {
+  // Handles: "Base64", "BASE64", "B64", "Base 64", "Base 64 Encoding", etc.
+  const n = _cleanCtrl(enc).toUpperCase();
+  return n.includes('BASE64') || n === 'B64';
+}
+
+function looksLikeB64Data(s, minLen) {
+  if (minLen === undefined) minLen = 100;
+  if (!s || s.trim().length < 4) return false;
+  const clean = _cleanCtrl(s);
+  if (clean.length < minLen) return false;
+  return /^[A-Za-z0-9+/]+=*$/.test(clean);
+}
+
+function extractBase64(raw) {
+  raw = raw.trim();
+  const parts = raw.split('^');
+
+  // Strategy 1: encoding descriptor in component[3] -> payload in component[4]
+  if (parts.length >= 5 && isBase64Encoding(parts[3])) {
+    const payload = parts[4].trim();
+    if (payload && looksLikeB64Data(payload)) return payload;
+  }
+
+  // Strategy 2: find the LARGEST component that looks like base64 data
+  // (handles Format C: PDF^IMAGE^^^<data> where encoding is blank)
+  let best = null;
+  let bestLen = 100;
+  for (const part of parts) {
+    const p = part.trim();
+    if (looksLikeB64Data(p)) {
+      const cl = _cleanCtrl(p).length;
+      if (cl > bestLen) { best = p; bestLen = cl; }
+    }
+  }
+  if (best) return best;
+
+  // Strategy 3: whole string is base64 (no HL7 wrapper)
+  if (looksLikeB64Data(raw)) return raw;
+
+  // Return as-is; decoder will fail gracefully with a message
+  return raw;
+}
+
+function looksLikeBase64(raw) {
+  raw = (raw || '').trim();
+  if (!raw || raw.length < 20) return false;
+  const parts = raw.split('^');
+  // Check encoding descriptor
+  if (parts.length >= 5 && isBase64Encoding(parts[3])) return true;
+  // Check if any component is large enough and looks like base64
+  for (const part of parts) {
+    if (looksLikeB64Data(part.trim())) return true;
+  }
+  // Check whole string
+  return looksLikeB64Data(raw);
+}
+
+
+function decodeB64() {
+  const raw = document.getElementById('b64-input').value.trim();
+  if (!raw) { alert('Paste base64 data into the left panel first.'); return; }
+  try {
+    // Strip HL7 ED (Encapsulated Data) prefix if present: ^AP^PDF^Base64^<data>
+    const extracted = extractBase64(raw);
+    const clean = extracted.replace(/\s+/g, '');
+    const pad = clean.length % 4;
+    const padded = pad ? clean + '='.repeat(4 - pad) : clean;
+    const bytes = Uint8Array.from(atob(padded), c => c.charCodeAt(0));
+    _b64DecodedBytes = bytes;
+    const isPdf = bytes[0]===0x25 && bytes[1]===0x50 && bytes[2]===0x44 && bytes[3]===0x46; // %PDF
+    const sizeStr = formatBytes(bytes.length);
+    if (isPdf) {
+      document.getElementById('b64-info').textContent = `✔ PDF detected · ${sizeStr} · click "Open PDF in Browser" to view`;
+      document.getElementById('b64-output').textContent = `[PDF Document — ${sizeStr}]\n\nClick "📄 Open PDF in Browser" to open the decoded PDF.\n\nPDF magic bytes confirmed: %PDF`;
+      showB64Section('text');
+    } else {
+      // Try UTF-8 text
+      try {
+        const text = new TextDecoder('utf-8', {fatal: true}).decode(bytes);
+        document.getElementById('b64-info').textContent = `✔ Text/UTF-8 decoded · ${sizeStr}`;
+        document.getElementById('b64-output').textContent = text;
+        showB64Section('text');
+      } catch {
+        // Binary — show hex
+        document.getElementById('b64-info').textContent = `✔ Binary data decoded · ${sizeStr}`;
+        const hex = Array.from(bytes.slice(0,512)).map(b => b.toString(16).padStart(2,'0')).join('');
+        document.getElementById('b64-output').textContent =
+          `[Binary data — ${sizeStr}]\n\nHex preview (first 512 bytes):\n` +
+          hex.match(/.{1,64}/g).join('\n');
+        showB64Section('text');
+      }
+    }
+  } catch(e) {
+    alert('Could not decode base64:\n' + e.message);
+  }
+}
+
+function openPdfBrowser() {
+  if (!_b64DecodedBytes) { decodeB64(); }
+  if (!_b64DecodedBytes) return;
+  if (!(_b64DecodedBytes[0]===0x25 && _b64DecodedBytes[1]===0x50)) {
+    alert('Decoded data does not appear to be a PDF.');
+    return;
+  }
+  // Create blob URL and open in new tab
+  const blob = new Blob([_b64DecodedBytes], {type:'application/pdf'});
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
+  setStatus('✔ PDF opened in new browser tab');
+}
+
+function saveDecoded() {
+  if (!_b64DecodedBytes) { alert('Decode data first.'); return; }
+  const isPdf = _b64DecodedBytes[0]===0x25 && _b64DecodedBytes[1]===0x50;
+  const blob = new Blob([_b64DecodedBytes], {type: isPdf ? 'application/pdf' : 'application/octet-stream'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = isPdf ? 'decoded.pdf' : 'decoded.bin';
+  a.click();
+  setStatus('✔ File saved');
+}
+
+function clearB64() {
+  document.getElementById('b64-input').value = '';
+  document.getElementById('b64-output').textContent = '';
+  document.getElementById('b64-info').textContent = 'Decoded output will appear here';
+  document.getElementById('pdf-embed').src = '';
+  showB64Section('text');
+  _b64DecodedBytes = null;
+}
+
+function importObx5() {
+  if (!parsedSegs.length) { alert('Parse an HL7 message first.'); return; }
+  const found = [];
+  for (const seg of parsedSegs) {
+    if (seg.name !== 'OBX') continue;
+    // OBX-5 is Observation Value — check all field indices for base64/ED data
+    // Field indices to check: 5 (OBX-5), and also the full raw if it contains Base64
+    for (let fi = 1; fi < seg.fields.length; fi++) {
+      const raw = fieldToRaw(seg.fields[fi]);
+      if (raw && looksLikeBase64(raw)) {
+        found.push({ segIdx: parsedSegs.indexOf(seg), fieldIdx: fi, raw });
+        break; // only first matching field per OBX segment
+      }
+    }
+  }
+  if (!found.length) {
+    alert('No base64 or HL7 ED (Encapsulated Data) found in any OBX segment.\n\nTip: Base64 in OBX is usually in OBX-5 with ED type (e.g. ^AP^PDF^Base64^<data>).');
+    return;
+  }
+  const first = found[0];
+  document.getElementById('b64-input').value = first.raw;
+  showMainTab('b64');
+  setStatus(`✔ Imported base64/ED data from OBX (${found.length} OBX segment(s) found)`);
+  // Auto-decode immediately
+  setTimeout(decodeB64, 100);
+}
+
+function sendToPdfTab() {
+  const raw = document.getElementById('field-editor').value.trim();
+  if (!raw) return;
+  document.getElementById('b64-input').value = raw;
+  showMainTab('b64');
+  setTimeout(decodeB64, 100);
+}
+
+function showB64Section(which) {
+  document.getElementById('b64-output').style.display = which === 'text' ? 'block' : 'none';
+  document.getElementById('pdf-embed-wrap').style.display = which === 'pdf' ? 'flex' : 'none';
+}
+
+function formatBytes(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n/1024).toFixed(1) + ' KB';
+  return (n/1048576).toFixed(2) + ' MB';
+}
+
+// ════════════════════════════════════════════════════
+// STATISTICS  (NEW)
+// ════════════════════════════════════════════════════
+function refreshStats() {
+  if (!parsedSegs.length) { alert('Parse an HL7 message first.'); return; }
+
+  const counts = {};
+  parsedSegs.forEach(s => counts[s.name] = (counts[s.name]||0) + 1);
+  let totalFields = 0;
+  parsedSegs.forEach(seg => {
+    seg.fields.forEach((f, idx) => { if (idx > 0 && fieldToRaw(f)) totalFields++; });
+  });
+
+  const msh = parsedSegs.find(s => s.name === 'MSH');
+  let msgType='', version='', sendApp='', recvApp='';
+  if (msh) {
+    try {
+      msgType = fieldToRaw(msh.fields[10] || [[['']]]);
+      version = fieldToRaw(msh.fields[13] || [[['']]]);
+      sendApp = fieldToRaw(msh.fields[3]  || [[['']]]);
+      recvApp = fieldToRaw(msh.fields[5]  || [[['']]]);
+    } catch(e) {}
+  }
+
+  // Cards
+  const cards = [
+    {val: parsedSegs.length, title: 'Segments', color: 'var(--accent)'},
+    {val: totalFields, title: 'Non-empty Fields', color: 'var(--accent2)'},
+    {val: Object.keys(counts).length, title: 'Unique Types', color: 'var(--accent3)'},
+    {val: msgType||'—', title: 'Message Type', color: 'var(--warn)'},
+    {val: version||'—', title: 'HL7 Version', color: 'var(--text)'},
+    {val: sendApp||'—', title: 'Sending App', color: 'var(--muted)'},
+    {val: recvApp||'—', title: 'Receiving App', color: 'var(--muted)'},
+  ];
+  const cardsEl = document.getElementById('stats-cards');
+  cardsEl.innerHTML = '';
+  cards.forEach(c => {
+    cardsEl.innerHTML += `<div class="stat-card">
+      <div class="val" style="color:${c.color}">${escHtml(String(c.val))}</div>
+      <div class="title">${c.title}</div>
+    </div>`;
+  });
+
+  // Frequency table
+  const tbody = document.getElementById('stats-body');
+  tbody.innerHTML = '';
+  Object.entries(counts).sort((a,b)=>b[1]-a[1]).forEach(([name, count]) => {
+    const desc = SEG_DESCS[name] || 'Custom/Z-Segment';
+    let notes = '';
+    if (name === 'OBX') {
+      const types = [...new Set(parsedSegs.filter(s=>s.name==='OBX' && s.fields.length>2).map(s=>fieldToRaw(s.fields[2])).filter(Boolean))];
+      if (types.length) notes = 'Value types: ' + types.join(', ');
+    }
+    tbody.innerHTML += `<tr>
+      <td>${name}</td>
+      <td>${count}</td>
+      <td>${escHtml(desc)}</td>
+      <td style="color:var(--muted);font-size:11px">${escHtml(notes)}</td>
+    </tr>`;
+  });
+  setStatus(`✔ Statistics refreshed · ${parsedSegs.length} segments · ${totalFields} fields`);
+}
+
+// ════════════════════════════════════════════════════
+// UTILITIES  (unchanged)
+// ════════════════════════════════════════════════════
+function setStatus(msg) {
+  document.getElementById('status-text').textContent = msg;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ════════════════════════════════════════════════════
+// KEYBOARD SHORTCUTS  (unchanged + new)
+// ════════════════════════════════════════════════════
+document.getElementById('input-box').addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key === 'Enter') parseMessage();
+});
+document.getElementById('field-editor').addEventListener('keydown', e => {
+  if (e.key === 'Enter') applyEdit();
+});
+document.getElementById('field-search').addEventListener('keydown', e => {
+  if (e.key === 'Enter') fieldSearchNext();
+});
+
+// Init
+showB64Section('text');
+loadSample();
+</script>
+</body>
+</html>

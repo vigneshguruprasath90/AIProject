@@ -1,4 +1,4 @@
-# ⚕ HL7 Viewer & Editor
+# Vignesh Guru Prasath HL7 Viewer & Editor
 
 A free, open-source HL7 message viewer and editor for internal/personal use.
 No license restrictions. Free for everyone.
@@ -30,7 +30,7 @@ No license restrictions. Free for everyone.
 ## Run
 
 ```bash
-python hl7_viewer.py
+python hl7_viewer v3.py
 ```
 
 Or double-click the script on Windows/macOS.
